@@ -85,7 +85,9 @@ object SparkSubmit extends CommandLineUtils with Logging {
    * 用提供的参数提交应用
    * 
    * 有2个步骤:
-   * 第一步：准备好启动环境，包括设置classpath、系统参数、应用参数，用指定的cluster manager和deploy mode 来运行指定的子main class（也就是命令行里指定的 -class 后的类了）。（这句话很短，但是代码很长，注意代码里的prepareSubmitEnviroment方法）
+   * 第一步：准备好启动环境，包括设置classpath、系统参数、应用参数，用指定的cluster manager和deploy mode 
+   * 来运行指定的子main class（也就是命令行里指定的 -class 后的类了）。
+   * （这句话很短，但是代码很长，注意代码里的prepareSubmitEnviroment方法）
    * 第二步：使用启动环境来装入(这里用了invoke)子main class的main函数，也就是application提交后真正执行的部分。
    */
   @tailrec
@@ -151,4 +153,7 @@ object SparkSubmit extends CommandLineUtils with Logging {
     }
   }
   ```
-快进到`doMain`方法
+
+快进到`doMain`方法:
+
+

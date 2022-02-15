@@ -90,10 +90,12 @@ object SparkSubmit extends CommandLineUtils with Logging {
    * （这句话很短，但是代码很长，注意代码里的prepareSubmitEnviroment方法）
    * 第二步：使用启动环境来装入(这里用了invoke)子main class的main函数，也就是application提交后真正执行的部分。
    */
-  @tailrec
+  @tailrec //<- 注意这里有一个尾递归标识
   private def submit(args: SparkSubmitArguments, uninitLog: Boolean): Unit = {
       // 注意，这里 prepareSubmitEnvironment 做了非常多的操作，包括了启动环境的判断，资源管理器的判断，arg中附带文件的判断等等。
       // 尤其对R做了不少兼容操作，最重要的是此时生成了控制application整个运行过程的sparkConf的初始版本
+      // 另外注意这个 childMainClass, 就是从命令行参数里取出来的我们自己开发的application执行类中的mainClass
+      // 在后面
     val (childArgs, childClasspath, sparkConf, childMainClass) = prepareSubmitEnvironment(args)
 
     def doRunMain(): Unit = {
@@ -129,7 +131,7 @@ object SparkSubmit extends CommandLineUtils with Logging {
       Logging.uninitialize()
     }
 
-    // 对1.3旧版本的一些兼容
+    // 1.3以后默认提交方式为rest，为了保证对面万一不是rest server的情况下也能顺利提交
     // In standalone cluster mode, there are two submission gateways:
     //   (1) The traditional RPC gateway using o.a.s.deploy.Client as a wrapper
     //   (2) The new REST-based gateway introduced in Spark 1.3
@@ -154,6 +156,83 @@ object SparkSubmit extends CommandLineUtils with Logging {
   }
   ```
 
-快进到`doMain`方法:
+快进到另起一个线程，用来真正执行任务的`runMain`方法:
 
+```scala
+  private def runMain(
+      childArgs: Seq[String],
+      childClasspath: Seq[String],
+      sparkConf: SparkConf,
+      childMainClass: String,
+      verbose: Boolean): Unit = {
+    if (verbose) {
+      logInfo(s"Main class:\n$childMainClass")
+      logInfo(s"Arguments:\n${childArgs.mkString("\n")}")
+      // sysProps may contain sensitive information, so redact before printing
+      logInfo(s"Spark config:\n${Utils.redact(sparkConf.getAll.toMap).mkString("\n")}")
+      logInfo(s"Classpath elements:\n${childClasspath.mkString("\n")}")
+      logInfo("\n")
+    }
+    // 从当前线程取ClassLoader(都继承了URLClassLoader)，
+    // DRIVER_USER_CLASS_PATH_FIRST 对应spark.driver.userClassPathFirst的选项
+    // 默认是false，也就是只取 MutableURLClassLoader
+    // 区别是ChildFirstURLClassLoader优先使用自己的URL
+    val loader =
+      if (sparkConf.get(DRIVER_USER_CLASS_PATH_FIRST)) {
+        new ChildFirstURLClassLoader(new Array[URL](0),
+          Thread.currentThread.getContextClassLoader)
+      } else {
+        new MutableURLClassLoader(new Array[URL](0),
+          Thread.currentThread.getContextClassLoader)
+      }
+    Thread.currentThread.setContextClassLoader(loader)
 
+    for (jar <- childClasspath) {
+        // 加载jar包，优先加载本地，跳过远程和本地不存在的
+      addJarToClasspath(jar, loader)
+    }
+
+    var mainClass: Class[_] = null
+
+    try {
+        // 返回任务的MainClass
+      mainClass = Utils.classForName(childMainClass)
+    } catch {
+      case e: ClassNotFoundException =>
+        //... 省略一些日志打印
+    }
+
+    // 判断是否可以转换为SparkApplication
+    val app: SparkApplication = if (classOf[SparkApplication].isAssignableFrom(mainClass)) {
+      mainClass.newInstance().asInstanceOf[SparkApplication]
+    } else {
+      // ... SPARK-4170  补丁，关于 scala.App trait 的判断，带有scala.App trait 可能工作不正常
+    }
+
+    // 递归获取错误信息
+    @tailrec
+    def findCause(t: Throwable): Throwable = t match {
+     // ...
+    }
+
+    try {
+        // 这下终于到了启动app了
+      app.start(childArgs.toArray, sparkConf)
+    } catch {
+      case t: Throwable =>
+        throw findCause(t)
+    }
+  }
+
+`start` 其实只是Spark程序的一个trait：
+
+```scala
+/**
+ * Entry point for a Spark application. Implementations must provide a no-argument constructor.
+ */
+private[spark] trait SparkApplication {
+
+  def start(args: Array[String], conf: SparkConf): Unit
+
+}
+```

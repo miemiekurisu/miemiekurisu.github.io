@@ -223,6 +223,7 @@ object SparkSubmit extends CommandLineUtils with Logging {
         throw findCause(t)
     }
   }
+```
 
 `start` 其实只是Spark程序的一个trait：
 

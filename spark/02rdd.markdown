@@ -9,7 +9,8 @@ layout: default
 ### 问题
 
 1. 什么是RDD？
-2. RDD转换过程？
+2. RDD的创建过程？
+3. RDD转换过程？
 
 ### 什么是RDD？
 
@@ -25,9 +26,9 @@ layout: default
    5. *（可选）*记录首选对分片执行计算的位置列表(感觉这个特性主要还是为了在HDFS上执行计算而进行的)
 5. RDD的创建方式：[There are two ways to create RDDs: parallelizing an existing collection in your driver program, or referencing a dataset in an external storage system, such as a shared filesystem, HDFS, HBase, or any data source offering a Hadoop InputFormat.](https://spark.apache.org/docs/latest/rdd-programming-guide.html#resilient-distributed-datasets-rdds) 除了new 一个 RDD 之外的主要途径是用`SparkContext`提供的`parallelize`方法把已存在的数据集转换为RDD，或者读取符合Hadoop InputFormat的数据集（多数情况下用这个）。
 
-### RDD的转换过程
+### RDD的创建过程
 
-为了搞清楚RDD的转换过程，我们先来看一下这两种方法都做了什么（官方文档的2个生成例子)
+为了搞清楚RDD的创建过程，我们先来看一下这两种方法都做了什么（官方文档的2个生成例子)
 
 1. `sc.parallelize`方法  
 
@@ -89,3 +90,45 @@ layout: default
       minPartitions).map(pair => pair._2.toString).setName(path)
     }
     ```
+
+    接着看：
+
+    ```scala
+    // hadoopFile 的方法签名
+    def hadoopFile[K, V](
+      path: String,
+      inputFormatClass: Class[_ <: InputFormat[K, V]],
+      keyClass: Class[K],
+      valueClass: Class[V],
+      minPartitions: Int = defaultMinPartitions): RDD[(K, V)] = withScope {
+    assertNotStopped()
+
+    // This is a hack to enforce loading hdfs-site.xml.
+    // See SPARK-11227 for details.
+    FileSystem.getLocal(hadoopConfiguration)
+
+    // A Hadoop configuration can be about 10 KB, which is pretty big, so broadcast it.
+    // 把hadoopConfigration序列化，广播一下提高效率
+    // 顺便一提，broadcast是个比较重的操作，从需要序列化就可以看出来，
+    // RDD不能直接被广播，必须做完collect动作以后把实际内容广播出去。
+    // broadcast是把值直接扔给broadcastManager，发送给全部node，所以要是实际物理大小太大的话就有点糟糕
+    val confBroadcast = broadcast(new SerializableConfiguration(hadoopConfiguration))
+    val setInputPathsFunc = (jobConf: JobConf) => FileInputFormat.setInputPaths(jobConf, path)
+    new HadoopRDD(
+      this,
+      confBroadcast,
+      Some(setInputPathsFunc),
+      inputFormatClass,
+      keyClass,
+      valueClass,
+      minPartitions).setName(path)
+    }
+    ```
+
+    方法里新生成了一个`HadoopRDD`返回，继续往下之前有2点值得注意：
+        1. withScope方法，稍微Google了一下，主要是为了标示RDD操作的作用域，获取一些信息，方便DAG进行可视化，详情参考[这里](https://github.com/apache/spark/pull/5729#issuecomment-97207217)
+        2. 强制加载 `hdfs-site.xml` 的hack，看了一下 [SPARK-11227](https://issues.apache.org/jira/browse/SPARK-11227)，是一个跟hadoop HA有关的bug，HA时取不到hostname的问题（**以后做相关开发的时候可能需要注意一下**）。
+
+    到这里RDD的创建过程就算结束了。
+
+### RDD的转换过程

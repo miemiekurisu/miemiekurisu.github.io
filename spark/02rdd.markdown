@@ -58,4 +58,34 @@ layout: default
 
     它继承的RDD构造器是没有deps的那个（抽象类RDD的构造函数是需要一个sparkContext，一个依赖列表`deps: Seq[Dependency[_]]`)，实际上也没有依赖，再往上就直接是scala collections（Seq）了。
 
-2. ```sc.textFile("data.txt")```
+    注意到它重载了父类RDD的`getPartions`方法：
+
+    ```scala
+    // 父类注释，本函数要求满足:
+    // `rdd.partitions.zipWithIndex.forall { case (partition, index) => partition.index == index }`的对应表达式
+    override def getPartitions: Array[Partition] = {
+    // 调用伴生对象的slice方法获得Seq数据的切片列表，返回一个Seq[Seq[T]]的列表，其实就是把整个Seq的内容按numSlices切分为多段，
+    // 当中有一些对Range和NumericRange对象的不同处理方式（不过slice内部函数position输出的是一个Iterator[(start:Int, end:Int)]
+    // 所以有点奇怪numericRange处理的必要性。。。) 
+    val slices = ParallelCollectionRDD.slice(data, numSlices).toArray
+    // 真正完成分区操作的是返回一个 ParallelCollectionPartition（Partition的子类） 的Array[Partition]对象，
+    // 到Partition层面就涉及spark对物理block的操作了，等看物理存储的时候再展开吧
+    slices.indices.map(i => new ParallelCollectionPartition(id, i, slices(i))).toArray
+    }
+    ```
+
+2. `sc.textFile("data.txt")`
+
+    这个函数也是一样：
+
+    ```scala
+    // 参数 minPartitions 同样跟着 `spark.default.parallelism` 
+    def textFile(
+      path: String,
+      minPartitions: Int = defaultMinPartitions): RDD[String] = withScope {
+    // 先判一下sc还活着吗？
+    assertNotStopped()
+    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
+      minPartitions).map(pair => pair._2.toString).setName(path)
+    }
+    ```

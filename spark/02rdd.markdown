@@ -57,16 +57,16 @@ layout: default
     extends RDD[T](sc, Nil)
     ```
 
-    它继承的RDD构造器是没有deps的那个（抽象类RDD的构造函数是需要一个sparkContext，一个依赖列表`deps: Seq[Dependency[_]]`)，实际上也没有依赖，再往上就直接是scala collections（Seq）了。
+    它继承的RDD构造器是没有deps的那个（抽象类RDD的构造方法是需要一个sparkContext，一个依赖列表`deps: Seq[Dependency[_]]`)，实际上也没有依赖，再往上就直接是scala collections（Seq）了。
 
     注意到它重载了父类RDD的`getPartions`方法：
 
     ```scala
-    // 父类注释，本函数要求满足:
+    // 父类注释，本方法要求满足:
     // `rdd.partitions.zipWithIndex.forall { case (partition, index) => partition.index == index }`的对应表达式
     override def getPartitions: Array[Partition] = {
     // 调用伴生对象的slice方法获得Seq数据的切片列表，返回一个Seq[Seq[T]]的列表，其实就是把整个Seq的内容按numSlices切分为多段，
-    // 当中有一些对Range和NumericRange对象的不同处理方式（不过slice内部函数position输出的是一个Iterator[(start:Int, end:Int)]
+    // 当中有一些对Range和NumericRange对象的不同处理方式（不过slice内部方法position输出的是一个Iterator[(start:Int, end:Int)]
     // 所以有点奇怪numericRange处理的必要性。。。) 
     val slices = ParallelCollectionRDD.slice(data, numSlices).toArray
     // 真正完成分区操作的是返回一个 ParallelCollectionPartition（Partition的子类） 的Array[Partition]对象，
@@ -77,7 +77,7 @@ layout: default
 
 2. `val textRdd = sc.textFile("data.txt")`
 
-    这个函数也是一样：
+    这个方法也是一样，位于`SparkContext`类：
 
     ```scala
     // 参数 minPartitions 同样跟着 `spark.default.parallelism` 
@@ -89,7 +89,7 @@ layout: default
 
     // 此处立刻调用了一个map,指定了路径、输入的类型[K,V]、（输出的）keyClass的类型、
     // （输出的）valueClass的类型，以及最小分区数量。
-    // 参考下面hadoopFile的函数签名，去掉path，和minPartitions。加上inputFormatClass是个
+    // 参考下面hadoopFile的方法签名，去掉path，和minPartitions。加上inputFormatClass是个
     // InputFormat[K,V]，相当于输入是个[K Class,V Class]，加上keyClass和valueClass，这四个是不是很熟悉？
     // 想想Hadoop MapReduce过程，extends Mapper<输入key,输入的value,输出的key,输出的value>
     hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
@@ -97,7 +97,7 @@ layout: default
     }
     ```
 
-    接着看：
+    接着看，`hadoopFile`也在`SparkContext`类里：
 
     ```scala
     // hadoopFile 的方法签名，指定了路径、输入的类型、Key的类型、Value的类型，以及最小分区数量
@@ -132,7 +132,7 @@ layout: default
     }
     ```
 
-    方法里新生成了一个`HadoopRDD`返回，继续往下之前有2点值得注意：
+    方法里新生成了一个`HadoopRDD`(`org.apache.spark.rdd.HadoopRDD`)返回，继续往下之前有2点值得注意：
         1. withScope方法，稍微Google了一下，主要是为了标示RDD操作的作用域，获取一些信息，方便DAG进行可视化，详情参考[这里](https://github.com/apache/spark/pull/5729#issuecomment-97207217)
         2. 强制加载 `hdfs-site.xml` 的hack，看了一下 [SPARK-11227](https://issues.apache.org/jira/browse/SPARK-11227)，是一个跟hadoop HA有关的bug，HA时取不到hostname的问题（**以后做相关开发的时候可能需要注意一下**）。
 
@@ -142,25 +142,25 @@ layout: default
 
 上面我们看到了五个特性中的**可分区性**和**依赖列表**，接下来具体看一看RDD的转换过程。
 
-接着刚才生成的`HadoopRDD`之后的map操作，`HadoopRDD`中并没有`overwrite` `map`函数，因此直接继承了RDD中的`map`函数。
+回到`SparkContext`的`textFile`方法，接着刚才生成的`HadoopRDD`之后的map操作，`HadoopRDD`中并没有`overwrite` `map`方法，因此直接继承了RDD中的`map`方法。
 
 ```scala
   def map[U: ClassTag](f: T => U): RDD[U] = withScope {
     // 好像以前没有clean这个东西，用来清除一些用不到的变量之类的，同时`主动检查一下f能不能序列化
     val cleanF = sc.clean(f)
-    // 定义了这样一个函数：入参是 this，(TaskContext, partition index, iterator) ，函数体是对迭代器进行map操作
+    // 定义了这样一个方法：入参是 this，(TaskContext, partition index, iterator) ，方法体是对迭代器进行map操作
     // 此处的map是scala 的 Iterator 对象的map
     new MapPartitionsRDD[U, T](this, (context, pid, iter) => iter.map(cleanF))
   }
 ```
 
-实际上就是把经过clean()的f函数二次封装成了
+实际上就是把经过clean()的f方法二次封装成了
 
 ```scala
 f = {thisRDD,(TaskContext,pid,iter) => iter.map(cleanF)}
 ```
 
-的形式，作为 MapPartitionsRDD的入参。参考 `MapPartitionsRDD` 的函数签名：
+的形式，作为 MapPartitionsRDD的入参。参考 `MapPartitionsRDD` 的方法签名：
 
 ```scala
 private[spark] class MapPartitionsRDD[U: ClassTag, T: ClassTag](
@@ -172,7 +172,7 @@ private[spark] class MapPartitionsRDD[U: ClassTag, T: ClassTag](
   extends RDD[U](prev)
 ```
 
-可以看到它继承了`RDD[U](prev)`的构造函数，而上面map函数中入参的 this，就是被MapPartitionRDD当作prev，
+可以看到它继承了`RDD[U](prev)`的构造方法，而上面map方法中入参的 this，就是被MapPartitionRDD当作prev，
 同时`f`的主要工作就是把一个T类型的迭代器 `Iterator[T]` 变换为一个U类型的迭代器 `Iterator[U]`。
 
 好，我们继续看下去，刚才我们说了，任意一个RDD，都应该有五个特征，我们一个个来看这个新生的`MapPartitionsRDD`的五个特征在哪里：

@@ -145,8 +145,9 @@ layout: default
 回到`SparkContext`的`textFile`方法，接着刚才生成的`HadoopRDD`之后的map操作，`HadoopRDD`中并没有`overwrite` `map`方法，因此直接继承了RDD中的`map`方法。
 
 ```scala
+  // 方法字面上的意思是要求传入一个将T转换为U的函数，最后返回一个类型为U的RDD
   def map[U: ClassTag](f: T => U): RDD[U] = withScope {
-    // 好像以前没有clean这个东西，用来清除一些用不到的变量之类的，同时`主动检查一下f能不能序列化
+    // 好像以前没有clean这个东西，用来清除一些用不到的变量之类的，同时主动检查一下f能不能序列化
     val cleanF = sc.clean(f)
     // 定义了这样一个方法：入参是 this，(TaskContext, partition index, iterator) ，方法体是对迭代器进行map操作
     // 此处的map是scala 的 Iterator 对象的map
@@ -154,13 +155,13 @@ layout: default
   }
 ```
 
-实际上就是把经过clean()的f方法二次封装成了
+实际上入参就是把经过clean()的f方法二次封装成了
 
 ```scala
-f = {thisRDD,(TaskContext,pid,iter) => iter.map(cleanF)}
+f = {this,(TaskContext,pid,iter) => iter.map(cleanF)}
 ```
 
-的形式，作为 MapPartitionsRDD的入参。参考 `MapPartitionsRDD` 的方法签名：
+的形式，作为 MapPartitionsRDD的入参。 对照`MapPartitionsRDD` 的方法签名：
 
 ```scala
 private[spark] class MapPartitionsRDD[U: ClassTag, T: ClassTag](
@@ -172,14 +173,59 @@ private[spark] class MapPartitionsRDD[U: ClassTag, T: ClassTag](
   extends RDD[U](prev)
 ```
 
-可以看到它继承了`RDD[U](prev)`的构造方法，而上面map方法中入参的 this，就是被MapPartitionRDD当作prev，
+|实参|形参|
+|this|prev|
+|(context,pid,iter)|f|
+|----|----|
+|f的实参|f的形参|
+|context|TaskContext|
+|pid|Int (partition index)|
+|iter|Iterator[T]|
+
+可以看到它继承了`RDD[U](prev)`的构造方法，而上面map方法中入参的 `this` 也就是 `HadoopRDD`，就是被`MapPartitionRDD`当作`prev`，
 同时`f`的主要工作就是把一个T类型的迭代器 `Iterator[T]` 变换为一个U类型的迭代器 `Iterator[U]`。
+
+说到这里，有没有发现生成`MapPartitionsRDD`的时候只是重新封装了一个方法，
+当时并没有`TaskContext`和`Partition.index`(作为`trait`的`Partition`有个声明为`Int`类型的`index`方法)，
+有此疑问的话可以提前看看`MapPartitionRDD`里被重载`computer`方法，之前我们说了，
+RDD其实是延迟计算的，所以这个时候只是在建立RDD之间的血缘关系，还没到实际计算的时候。
 
 好，我们继续看下去，刚才我们说了，任意一个RDD，都应该有五个特征，我们一个个来看这个新生的`MapPartitionsRDD`的五个特征在哪里：
 
 1. 可分区性：
 
-    可分区性在哪里呢
+    可分区性依然体现在`getPartitions`方法里，很简单，就一句，取了firstParent的分区：
+
+    ```scala
+      override def getPartitions: Array[Partition] = firstParent[T].partitions
+    ```
+
+    这个`firstParent`何许人也？我们回`RDD`去认识一下：
+
+    ```scala
+      /** Returns the first parent RDD */
+    protected[spark] def firstParent[U: ClassTag]: RDD[U] = {
+        dependencies.head.rdd.asInstanceOf[RDD[U]]
+    }
+    ```
+
+    `dependencies`也是个方法：
+
+    ```scala
+
+    // 因为 MapPartitionsRDD 没有 overwrite这个方法，而是直接用了父类RDD的方法
+    // 所以 MapPartitionsRDD 是个OneToOne的依赖，参考 Dependency 抽象类可以看到它继承了NarrowDependency，
+    // 属于窄依赖的一种。
+    final def dependencies: Seq[Dependency[_]] = {
+        // 会先从checkpoint里捞一下，如果没有的话就直接就再捞一下
+      checkpointRDD.map(r => List(new OneToOneDependency(r))).getOrElse {
+        if (dependencies_ == null) {
+          dependencies_ = getDependencies
+        }
+        dependencies_
+      }
+    }
+    ```
 
 ---
 再加上几个RDD转换的例子进行进一步调试：

@@ -189,6 +189,18 @@ private[spark] class MapPartitionsRDD[U: ClassTag, T: ClassTag](
 可以看到它继承了`RDD[U](prev)`的构造方法，而上面map方法中入参的 `this` 也就是 `HadoopRDD`，就是被`MapPartitionRDD`当作`prev`，
 同时`f`的主要工作就是把一个T类型的迭代器 `Iterator[T]` 变换为一个U类型的迭代器 `Iterator[U]`。
 
+{: #pred_deps}
+此处划个重点，它继承的父类RDD构造器是下面这个：
+
+```scala
+  // MapPartitionsRDD 是个OneToOne的依赖，参考 Dependency 抽象类可以看到它继承了NarrowDependency，
+  // 属于窄依赖的一种。
+  def this(@transient oneParent: RDD[_]) =
+    this(oneParent.context, List(new OneToOneDependency(oneParent)))
+```
+
+在生成新`MapPartitionRDD`的时候把前一个RDD的sc和前一个RDD的依赖关系传入了。
+
 说到这里，有没有发现生成`MapPartitionsRDD`的时候只是重新封装了一个方法，
 当时并没有`TaskContext`和`Partition.index`(作为`trait`的`Partition`有个声明为`Int`类型的`index`方法)，
 有此疑问的话可以提前看看`MapPartitionRDD`里被重载`computer`方法，之前我们说了，
@@ -217,13 +229,11 @@ RDD其实是延迟计算的，所以这个时候只是在建立RDD之间的血�
 
     ```scala
 
-    // 因为 MapPartitionsRDD 没有 overwrite这个方法，而是直接用了父类RDD的方法
-    // 所以 MapPartitionsRDD 是个OneToOne的依赖，参考 Dependency 抽象类可以看到它继承了NarrowDependency，
-    // 属于窄依赖的一种。
     final def dependencies: Seq[Dependency[_]] = {
         // 会先从checkpoint里捞一下，如果没有的话就直接就再去dependencises_里捞一下
       checkpointRDD.map(r => List(new OneToOneDependency(r))).getOrElse {
         if (dependencies_ == null) {
+            //dependencies_ 里也没有，实在捞不着的时候再用getDependencies挖一下
           dependencies_ = getDependencies
         }
         dependencies_
@@ -231,8 +241,58 @@ RDD其实是延迟计算的，所以这个时候只是在建立RDD之间的血�
     }
     ```
 
-    所以对 `MapPartitionsRDD` 来说，`firstParent`就是依赖链列表里的第一个RDD，它的分区只是去取了第一个依赖的分区。
-    注意这个`dependencies`，下面说依赖链的时候还会说到
+    而这个`getDependencies`也很有意思，就直接去取了 `deps`，是不是有点眼熟？[传送门](#pred_deps)
+
+    ```scala
+      protected def getDependencies: Seq[Dependency[_]] = deps
+    ```
+
+    所以对 `MapPartitionsRDD` 来说，`firstParent`就是依赖链列表里的第一个RDD，
+    当时new的时候用的是`HadoopRDD`对吧？所以找到的这个firstParent就是`HadoopRdd`。
+
+    通过上面的调用过程可以发现，`MapPartitionsRDD` 的分区列表的寻找其实是个方法的调用链，
+    对当前RDD做 `getPartitions` 获取分区的操作，其实是通过一系列的方法套娃过程计算出来的
+    （这是在没有生成`checkPointRDD`的情况下，有checkpointRDD的话会直接从当中某个阶段求起，
+    这个下次单独挖`checkpoint()`方法的时候再说）:
+
+    ```scala
+    MapPartitionsRDD.getPartitions() {
+        //
+        MapPartitionsRDD.firstParent(){
+            //
+            MapPartitionsRDD.dependencies(){
+                //一路调用链到此处，发现就是deps,参考过Dependency的实现就知道了，
+                // 实际上Dependency就是rdd外面又套了个壳
+                MapPartitionsRDD.getDependencies() 
+            }
+        }
+    }
+    ```
+
+    所以我们可以得出一个这样的结论: `MapPartitionsRDD`的依赖列表里就只有一个元素，就是这个从上一个RDD生成的`Seq[Dependency[_]]`,
+    不仅`MapPartitionsRDD`如此，采用此类构造器，没有`overwrite`过相关方法的RDD皆然，所以想见大部分RDD实现都是One2One的窄依赖。
+
+    最后的`partitions` 就简单了，直接调用了返回的`HadoopRDD`的partitions方法，
+    但实际上`HadoopRDD`里并没有overwrite这个方法，所以还是RDD本身的`partitions`方法：
+
+    ```scala
+    final def partitions: Array[Partition] = {
+        checkpointRDD.map(_.partitions).getOrElse {
+          if (partitions_ == null) {
+            partitions_ = getPartitions //所以最后用的还是HadoopRDD的getPartitions方法
+            partitions_.zipWithIndex.foreach { case (partition, index) =>
+              require(partition.index == index,
+                s"partitions($index).partition == ${partition.index}, but it should equal $index")
+            }
+          }
+          partitions_
+        }
+      }
+    ```
+
+    `HadoopRDD`的`getPartitions`方法就不继续分析了，
+    无非就是生成了一堆`HadoopPartition`，感觉以后挖物理存储的时候再展开比较好。
+
 2. [可用于计算的 `compute` 函数](#five-2)：
 
     `MapPartitionsRDD` 重载了这个方法，注意下面这个 `f` （[此处回忆杀](#cleanf)）：
@@ -248,7 +308,7 @@ RDD其实是延迟计算的，所以这个时候只是在建立RDD之间的血�
 
 3. [RDD依赖列表（血缘关系）](#five-3)
 
-    所以 `firstParent[T].partitions`  奥秘在于。。。它是个长长的函数调用链
+    分析分区的时候仔细分析过了，是个长长的函数调用链套娃。
 
 ---
 再加上几个RDD转换的例子进行进一步调试：

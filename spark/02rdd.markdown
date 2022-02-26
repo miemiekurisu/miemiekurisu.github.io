@@ -47,6 +47,7 @@ layout: default
 
     从 `ParallelCollectionRDD` 的声明中可以看到：
 
+    {: #createPCR}
     ```scala
     private[spark] class ParallelCollectionRDD[T: ClassTag](
     sc: SparkContext,

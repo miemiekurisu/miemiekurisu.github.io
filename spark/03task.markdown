@@ -2,11 +2,11 @@
 permalink: /spark/task
 layout: default
 ---
-## 分析和解析任务执行过程
+
+## 任务执行过程
 
 问题：
  - 一个Spark任务究竟是怎么执行的？
-
 
 ### 一个Spark任务究竟是怎么执行的
 

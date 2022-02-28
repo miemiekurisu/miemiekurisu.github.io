@@ -35,7 +35,9 @@ layout: default
   extends Logging with Serializable
 ```
 
-这里用了scala的隐式转换，
+这里用了scala的隐式转换，把RDD转换为一个`PairRDDFunctions`，
+隐含的参数是pairRDD中包含的key和value的ClassTag，由于不确定RDD的类型，
+采用了常见的隐式参数保留运行时类型信息。(看不明白的补一下ClassTag)
 
 在[上一节](/spark/rdd/#createPCR)，我们已经看到 `firstRdd` 和 `secondRdd` 创建的是 `ParallelCollectionRDD`，
 我们先看看`join`函数：

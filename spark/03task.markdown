@@ -20,12 +20,12 @@ layout: default
 所以我决定从一段简单的REPL代码入手：
 
 ```scala
-     val firstRdd = sc.parallelize(Seq((1,2),(3,4),(5,6)))
-     val secondRdd = sc.parallelize(Seq((1,'a'),(3,'b'),(5,'c')))
-     firstRdd.join(secondRdd).collect
+     val groupRdd = sc.parallelize(Seq((1,2),(3,4),(5,6),(1,5),(3,8)))
+     val shuffRDD = groupRdd.groupByKey()
+     shuffRDD.collect
 ```
 
-特意挑了一个 `join` 函数，这个函数在 `PairRDDFunctions` 里，在 `RDD` 本身代码里是找不到的。
+挑了一个会产生`ShuffledRDD`的`groupByKey` 函数，这个函数在 `PairRDDFunctions` 里，在 `RDD` 本身代码里是找不到的。
 
 顺便提一下这个 `PairRDDFunctions`，签名是这样的：
 
@@ -36,22 +36,26 @@ layout: default
 ```
 
 这里用了scala的隐式转换，把RDD转换为一个`PairRDDFunctions`，
-隐含的参数是pairRDD中包含的key和value的ClassTag，由于不确定RDD的类型，
-采用了常见的隐式参数保留运行时类型信息。(看不明白的补一下ClassTag)
+隐含的参数是pairRDD中包含的key和value的ClassTag，由于不确定RDD中key和value的类型，
+采用了常见的隐式参数保留运行时类型信息。(看不明白的补一下`ClassTag`)
 
-在[上一节](/spark/rdd/#createPCR)，我们已经看到 `firstRdd` 和 `secondRdd` 创建的是 `ParallelCollectionRDD`，
-我们先看看`join`函数：
+把RDD转换为 `PairRDDFunctions`的隐式转换方法在spark 1.3之前需要 `import SparkContext._`,
+1.3之后挪到了RDD的 `rddToPairRDDFunctions` 方法里。
+
+在[上一节](/spark/rdd/#createPCR)，我们已经看到 `groupRdd` 是个 `ParallelCollectionRDD`，
+接下来我们看看产生shuffRDD的`groupByKey`函数：
 
 ```scala
-      /**
-   * Return an RDD containing all pairs of elements with matching keys in `this` and `other`. Each
-   * pair of elements will be returned as a (k, (v1, v2)) tuple, where (k, v1) is in `this` and
-   * (k, v2) is in `other`. Uses the given Partitioner to partition the output RDD.
-   */
-  def join[W](other: RDD[(K, W)], partitioner: Partitioner): RDD[(K, (V, W))] = self.withScope {
-    this.cogroup(other, partitioner).flatMapValues( pair =>
-      for (v <- pair._1.iterator; w <- pair._2.iterator) yield (v, w)
-    )
+    def groupByKey(partitioner: Partitioner): RDD[(K, Iterable[V])] = self.withScope {
+    // groupByKey shouldn't use map side combine because map side combine does not
+    // reduce the amount of data shuffled and requires all map side data be inserted
+    // into a hash table, leading to more objects in the old gen.
+    val createCombiner = (v: V) => CompactBuffer(v)
+    val mergeValue = (buf: CompactBuffer[V], v: V) => buf += v
+    val mergeCombiners = (c1: CompactBuffer[V], c2: CompactBuffer[V]) => c1 ++= c2
+    val bufs = combineByKeyWithClassTag[CompactBuffer[V]](
+      createCombiner, mergeValue, mergeCombiners, partitioner, mapSideCombine = false)
+    bufs.asInstanceOf[RDD[(K, Iterable[V])]]
   }
 ```
 
@@ -65,7 +69,7 @@ layout: default
 
   def cogroup[W](other: RDD[(K, W)], partitioner: Partitioner)
       : RDD[(K, (Iterable[V], Iterable[W]))] = self.withScope {
-    // 检查一下key不能是array，为啥？请参考底下链接
+    // 检查一下key不能是array，为啥？请参考底下链接发挥想象力
     if (partitioner.isInstanceOf[HashPartitioner] && keyClass.isArray) {
       throw new SparkException("HashPartitioner cannot partition array keys.")
     }
@@ -76,7 +80,7 @@ layout: default
   }
 ```
 
-
 ---
 参考：
+
 1. [为啥key不能是array？](https://stackoverflow.com/questions/9973596/arraylist-as-key-in-hashmap)

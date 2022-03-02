@@ -341,7 +341,7 @@ RDD其实是延迟计算的，所以这个时候只是在建立RDD之间的血�
         - MapPartitionsRDD_1.compute
           - MapPartitionsRDD_2.computeOrReadCheckpoint
             - MapPartitionsRDD_2.compute
-              - ....1
+              - ...
 
 [4](#five-4)和[5](#five-5)的主题其实都比较大了，放到以后挖分区机制和物理存储的时候再看吧
 

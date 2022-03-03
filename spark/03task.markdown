@@ -59,26 +59,8 @@ layout: default
   }
 ```
 
-继续下到 `cogroup` 函数：
-
-```scala
-      /**
-   * For each key k in `this` or `other`, return a resulting RDD that contains a tuple with the
-   * list of values for that key in `this` as well as `other`.
-   */
-
-  def cogroup[W](other: RDD[(K, W)], partitioner: Partitioner)
-      : RDD[(K, (Iterable[V], Iterable[W]))] = self.withScope {
-    // 检查一下key不能是array，为啥？请参考底下链接发挥想象力
-    if (partitioner.isInstanceOf[HashPartitioner] && keyClass.isArray) {
-      throw new SparkException("HashPartitioner cannot partition array keys.")
-    }
-    val cg = new CoGroupedRDD[K](Seq(self, other), partitioner)
-    cg.mapValues { case Array(vs, w1s) =>
-      (vs.asInstanceOf[Iterable[V]], w1s.asInstanceOf[Iterable[W]])
-    }
-  }
-```
+可以看到方法先建了一个`CompactBuffer`关于`CompactBuffer`的进一步深挖可以看[这里](/spark/appendix/appendix/#CompactBuffer)，
+目的是
 
 ---
 参考：

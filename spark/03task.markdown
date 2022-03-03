@@ -123,6 +123,7 @@ groupRdd.combineByKeyWithClassTag(miemie1,miemie2,miemie3).collect
 ![avatar][results1]
 是不是很有趣？
 
+test
 ---
 参考：
 

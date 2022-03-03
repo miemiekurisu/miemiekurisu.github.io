@@ -1,6 +1,7 @@
 ---
 layout: default
 ---
+
 ## Spark2.4代码阅读日志
 
 Spark代码阅读分析备忘录
@@ -16,3 +17,9 @@ Spark代码阅读分析备忘录
 ### 任务执行解析
 
 分析[任务执行过程](/spark/task)
+
+---
+
+### 附录
+
+挖掘代码过程中的一些[分叉](/spark/appendix/appendix)

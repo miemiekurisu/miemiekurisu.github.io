@@ -123,6 +123,48 @@ groupRdd.combineByKeyWithClassTag(miemie1,miemie2,miemie3).collect
 ![avatar][results1]
 是不是很有趣？
 
+下面的`Aggregator`就不往下深挖了，本篇的主要目的还是看任务执行。
+
+快进到`collect`函数：
+
+```scala
+  def collect(): Array[T] = withScope {
+    val results = sc.runJob(this, (iter: Iterator[T]) => iter.toArray)
+    Array.concat(results: _*)
+  }
+```
+
+很简单，就2行，可以看出第二行是个对Driver压力很大的操作，
+
+直接把各服务器上返回的`Iterator`返回成`Array`，再合并成一个，如果数据较多的话显然对Driver产生很大的内存压力。
+
+一路往下我们可以看到调用链是这样的：
+
+`RDD.collect => sparkContext.runJob (当中套了好几次runJob的多态函数)=> dagScheduler.runJob =>dagScheduler.submitJob`
+
+一路最后来到DAGScheuler的submitJob函数：
+
+```scala
+def submitJob[T, U](
+      rdd: RDD[T],
+      func: (TaskContext, Iterator[T]) => U,
+      partitions: Seq[Int],
+      callSite: CallSite,
+      resultHandler: (Int, U) => Unit,
+      properties: Properties): JobWaiter[U] = {
+
+          //...省略
+    // 真正提交任务的就这么2句：
+    // 先创建一个waiter，waiter的主要工作是在运行时向dagScheduler上报一些状态信息，同时控制任务工作
+     val waiter = new JobWaiter(this, jobId, partitions.size, resultHandler)
+     //费了九牛二虎之力，终于把任务提交上去了
+    eventProcessLoop.post(JobSubmitted(
+      jobId, rdd, func2, partitions.toArray, callSite, waiter,
+      SerializationUtils.clone(properties)))
+      //...省略
+      }
+```
+
 ---
 参考：
 

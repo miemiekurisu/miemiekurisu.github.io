@@ -248,7 +248,15 @@ def submitJob[T, U](
 ```
 
 后面的调用链有点长：
-`DAGScheduler.createResultStage => DAGScheduler.getOrCreateParentStages =>DAGScheduler.getShuffleDependencies`
+
+```text
+DAGScheduler.createResultStage => 
+    DAGScheduler.getOrCreateParentStages => 
+        DAGScheduler.getShuffleDependencies =>
+            DAGScheduler.getOrCreateShuffleMapStage =>
+                DAGScheduler.getMissingAncestorShuffleDependencies (需要补stage的时候)
+
+```
 
 这里是真正计算Shuffle依赖关系的地方：
 
@@ -268,6 +276,7 @@ def submitJob[T, U](
       val toVisit = waitingForVisit.pop()
       if (!visited(toVisit)) {
         visited += toVisit
+        //注意这里！
         toVisit.dependencies.foreach {
           case shuffleDep: ShuffleDependency[_, _, _] =>
             parents += shuffleDep
@@ -279,6 +288,99 @@ def submitJob[T, U](
     parents
   }
 ```
+
+注意`toVisit.dependencies`，这里同样调用了`dependencies`方法，还[记得吗？](/spark/rdd/#pred_deps)
+
+如其名，在这个函数里会对每一个当前RDD依赖的每一个RDD进行遍历，求它的`ShuffleDependency`，
+
+它是`Dependency`的子类，内部加入了一些shuffle专用的方法，先留个[坑](/spark/shuffle),
+
+后续研究shuffle过程的时候再仔细看。
+
+实际上就是传递了一个shuffle的依赖链返回给`getOrCreateParentStages`，
+对每一个shuffleDep求`getOrCreateShuffleMapStage`：
+
+```scala
+    /**
+   * 简而言之就是前面有stage就取stage，没有就补一下
+   */
+  private def getOrCreateShuffleMapStage(
+      shuffleDep: ShuffleDependency[_, _, _],
+      firstJobId: Int): ShuffleMapStage = {
+          // shuffleIdToMapStage 是个HashMap[Int, ShuffleMapStage]
+    shuffleIdToMapStage.get(shuffleDep.shuffleId) match {
+        // 注意这里的stage是  ShuffleMapStage，即函数定义的返回值
+      case Some(stage) =>
+        stage
+
+      case None =>
+        // 按上面的代码，DAGScheduler里肯定是个空的HashMap咯，那就开始补
+        // 注意这里补全部shuffle依赖，这里用了 ancestor，不确定是不是会追溯再之前的stage依赖。
+        // 继续往下看
+        // 这个函数的内容跟之前 getShuffleDependencies 的内容几乎是一样的，
+        // 实际上关键的寻找shuffle依赖部分用的还是getShuffleDependencies
+        // 只是循环查找的是之前每个RDD里是否存在shuffleStage生成。
+        // 这个例子里是没有的，所以这段代码就被跳过了。
+        getMissingAncestorShuffleDependencies(shuffleDep.rdd).foreach { dep =>
+          // Even though getMissingAncestorShuffleDependencies only returns shuffle dependencies
+          // that were not already in shuffleIdToMapStage, it's possible that by the time we
+          // get to a particular dependency in the foreach loop, it's been added to
+          // shuffleIdToMapStage by the stage creation process for an earlier dependency. See
+          // SPARK-13902 for more information.
+          // createShuffleMapStage函数会生成shuffleMapStage，并且扔进shuffleIdToMapStage
+          // 关于这部分，下次在Shuffle过程里做个例子详细研究
+          if (!shuffleIdToMapStage.contains(dep.shuffleId)) {
+            createShuffleMapStage(dep, firstJobId)
+          }
+        }
+        // Finally, create a stage for the given shuffle dependency.
+        // 为当前shuffleDependancy生成shuffleMapStage，并且扔进shuffleIdToMapStage里
+        createShuffleMapStage(shuffleDep, firstJobId)
+    }
+  }
+```
+
+再继续往下，进入到`createShuffleMapStage`，我们平时spark UI里看到的stages，就是在这里生成的：
+
+```scala
+      def createShuffleMapStage(shuffleDep: ShuffleDependency[_, _, _], jobId: Int): ShuffleMapStage = {
+    val rdd = shuffleDep.rdd
+    //……省略 BarrierStage 的检查
+    // 任务数是由shuffleDep的rdd分区数量决定的
+    val numTasks = rdd.partitions.length
+    // 这里又调用一次，spark团队你有多害怕漏了前置依赖啊。。。
+    val parents = getOrCreateParentStages(rdd, jobId)
+    // 直接分配stage的id，注意这是在DAGScheduler里以并发安全方式分配的
+    val id = nextStageId.getAndIncrement()
+    // 生成新的 shuffleMapStage
+    // 注意这里的 mapOutputTracker，这是在DAGScheduler生成的时候就同时生成的
+    // 这是一个 MapOutputTrackerMaster 类，对这个类说明：
+    // Driver-side class that keeps track of the location of the map output of a stage.
+    // 就是用来指明map之后产生的数据去哪里拿的，用来提供信息给reduce程序
+    // 然后这个creationSite也很有意思，这个creationSite就是创建这个RDD的代码文本（RDD里乱七八糟的东西还真多）
+    val stage = new ShuffleMapStage(
+      id, rdd, numTasks, parents, jobId, rdd.creationSite, shuffleDep, mapOutputTracker)
+
+    stageIdToStage(id) = stage
+    shuffleIdToMapStage(shuffleDep.shuffleId) = stage
+    updateJobIdStageIdMaps(jobId, stage)
+
+    if (!mapOutputTracker.containsShuffle(shuffleDep.shuffleId)) {
+      // Kind of ugly: need to register RDDs with the cache and map output tracker here
+      // since we can't do it in the RDD constructor because # of partitions is unknown
+      logInfo("Registering RDD " + rdd.id + " (" + rdd.getCreationSite + ")")
+      mapOutputTracker.registerShuffle(shuffleDep.shuffleId, rdd.partitions.length)
+    }
+    stage
+  }
+```
+
+这个函数主要修改了DAGScheduler的3个内部变量：
+
+- stageIdToStage：
+- shuffleIdToMapStage：
+- jobIdToStageIds：
+
 ---
 参考：
 

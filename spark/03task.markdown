@@ -467,7 +467,7 @@ DAGScheduler.createResultStage =>
   }
 ```
 
-来，我们看看这个 `submitMissingTasks`:
+来，我们看看这个 `submitMissingTasks`(这个方法好长……酌情省略):
 
 ```scala
       /** Called when stage's parents are available and we can now do its task. */
@@ -475,12 +475,18 @@ DAGScheduler.createResultStage =>
     logDebug("submitMissingTasks(" + stage + ")")
 
     // First figure out the indexes of partition ids to compute.
+    // 先取stage的partition，之前说了，Stage是个抽象类，它的实现只有2种：
+    // ShuffleMapStage 和 ResultStage，结合测试代码看，第一次调用此方法的肯定是ShuffleMapStage
+    // 还记得之前创建ShuffleMapStage的构造函数吗？创建的时候传入了一个MapOutputTrackerMaster
+    // 由这个 MapOutputTrackerMaster 决定 ShuffleMapStage的物理位置
     val partitionsToCompute: Seq[Int] = stage.findMissingPartitions()
 
     // Use the scheduling pool, job group, description, etc. from an ActiveJob associated
     // with this Stage
+    // 获得一些配置，这个properties将来执行任务会用到
     val properties = jobIdToActiveJob(jobId).properties
 
+    //把当前stage加入执行队列
     runningStages += stage
     // SparkListenerStageSubmitted should be posted before testing whether tasks are
     // serializable. If tasks are not serializable, a SparkListenerStageCompleted event

@@ -225,6 +225,8 @@ def submitJob[T, U](
      }
 ```
 
+{: result_stage}
+
 ```scala
     private[scheduler] def handleJobSubmitted(jobId: Int,
       finalRDD: RDD[_],
@@ -245,7 +247,12 @@ def submitJob[T, U](
         // 如果有错误则会新增一个messageScheduler来重新提交一遍进eventProcessLoop
         // 延迟时间timeIntervalNumTasksCheck为15秒
     }
+
+    //……这里暂时省略到下半场
+    }
 ```
+
+{: result_part}
 
 后面的调用链有点长：
 
@@ -368,18 +375,60 @@ DAGScheduler.createResultStage =>
     if (!mapOutputTracker.containsShuffle(shuffleDep.shuffleId)) {
       // Kind of ugly: need to register RDDs with the cache and map output tracker here
       // since we can't do it in the RDD constructor because # of partitions is unknown
+      // 这里算官方吐槽了吧……
       logInfo("Registering RDD " + rdd.id + " (" + rdd.getCreationSite + ")")
+      // 去 mapOutputTracker （MapOutputTrackerMaster）里注册
       mapOutputTracker.registerShuffle(shuffleDep.shuffleId, rdd.partitions.length)
     }
     stage
   }
 ```
 
-这个函数主要修改了DAGScheduler的3个内部变量：
+这个函数主要修改了DAGScheduler的3个内部变量，有趣的是这3个都是HashMap：
 
-- stageIdToStage：
-- shuffleIdToMapStage：
-- jobIdToStageIds：
+- jobIdToStageIds：内部变量 `nextJobId` 产生的 JobId 和`nextStageId`产生的 StageId 的对应关系，
+  是最后被`updateJobIdStageIdMaps`递归修改的
+- stageIdToStage：最先被修改的，`nextStageId`产生的 StageId 与实际Stage之间的关系
+- shuffleIdToMapStage：`newShuffleId` 产生的ShuffleId与MapStage的关系，
+  注意这个`newShuffleId`是sparkContext的方法，也就是说这个shuffleId是sparkContext层面的唯一。
+
+好了，shuffleStage终于完成了DAG生成、创建、注册的一系列过程，终于可以[返回](#createResultStage)了，
+此时ResultStage已经生成，回到[`handleJobSubmitted`](#result_part)的下半场:
+
+```scala
+    private[scheduler] def handleJobSubmitted(jobId: Int,
+      finalRDD: RDD[_],
+      func: (TaskContext, Iterator[_]) => _,
+      partitions: Array[Int],
+      callSite: CallSite,
+      listener: JobListener,
+      properties: Properties) {
+        //……此处省略上半场
+        // resultStage已生成
+    
+    // 用上面的信息创建一个ActiveJob
+     val job = new ActiveJob(jobId, finalStage, callSite, listener, properties)
+     //清除RDD的分区和位置缓存信息，注意这个方法是synchronized
+    clearCacheLocs()
+    //……省略一些日志……日志里还不放心，还要调一次getMissingParentStages
+
+    val jobSubmissionTime = clock.getTimeMillis()
+    jobIdToActiveJob(jobId) = job
+    activeJobs += job
+    finalStage.setActiveJob(job)
+    // 注意这里，上面更新 jobIdToStageIds 的用处来了，这个测试job有2个stage
+    // 一个 shuffleStage <- 0，一个 resultStage <- 1
+    val stageIds = jobIdToStageIds(jobId).toArray
+    // 获取信息
+    val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
+    // 先提交给 LiveListenerBus 注册一个事件，这个事件实际上会通过 trait SparkListenerBus 转发 
+    // 实现类是 AsyncEventQueue
+    listenerBus.post(
+      SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
+    submitStage(finalStage)
+  }
+    }
+```
 
 ---
 参考：

@@ -494,6 +494,8 @@ DAGScheduler.createResultStage =>
     // event.
     stage match {
       case s: ShuffleMapStage =>
+      // 这个outputCommitCoordinator可厉害了，是Spark集群启动时维护的OutputCommitCoordinator对象
+      // 用来决定谁有权，在outputCommitCoordinator内部维护着一个私有变量stageStates
         outputCommitCoordinator.stageStart(stage = s.id, maxPartitionId = s.numPartitions - 1)
       case s: ResultStage =>
         outputCommitCoordinator.stageStart(

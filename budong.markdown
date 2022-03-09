@@ -18,6 +18,10 @@ Spark代码阅读分析备忘录
 
 分析[任务执行过程](/spark/task)
 
+### Spark集群启动过程
+
+分析[Spark集群启动过程](/spark/parkstartup)
+
 ---
 
 ### 附录

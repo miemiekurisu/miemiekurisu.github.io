@@ -494,13 +494,38 @@ DAGScheduler.createResultStage =>
     // event.
     stage match {
       case s: ShuffleMapStage =>
-      // 这个outputCommitCoordinator可厉害了，是Spark集群启动时维护的OutputCommitCoordinator对象
-      // 用来决定谁有权，在outputCommitCoordinator内部维护着一个私有变量stageStates
+      // 这个 outputCommitCoordinator 可厉害了，是Spark集群启动时维护的 OutputCommitCoordinator 对象
+      // 它会同时跟踪 task Id 和 stage Id，用来避免某些情况下同一个 stage 的 task 执行两遍，
+      // 通过在内部维护着一个私有变量stageStates来决定partition上的task是否有权对这个partition提交任务输出。
+      // 这部分实现被修改过，在2.0和1.x时代通过一个内部变量 authorizedCommittersByStage 来实现
+      // 详细实现下次开个坑说吧，这里调用stageStart主要就是对task进行授权注册，表示这个stage要开始执行了。
+      // 注意 stageStart 这个方法是 synchronized 的。
         outputCommitCoordinator.stageStart(stage = s.id, maxPartitionId = s.numPartitions - 1)
       case s: ResultStage =>
         outputCommitCoordinator.stageStart(
           stage = s.id, maxPartitionId = s.rdd.partitions.length - 1)
     }
+    /**
+    // 敲重点：getPreferredLocs
+    // 看名字就知道了吧，这里是对执行的最佳物理位置的计算
+    // 主要调用链是：getPreferredLocs => getPreferredLocsInternal => rdd.preferredLocations =>
+    // MapOutputTrackerMaster.getPreferredLocationsForShuffle
+    // 在 getPreferredLocsInternal 里把 RDD 的 partition 取出来（这里会重新检查一下分区），
+    // 传入 RDD 的 preferredLocations 里。
+    // 注意这里的RDD，我们的测试例子里第一个产生的是 ShuffledRDD ，在 ShuffledRDD 里 overwrite 了这个方法。
+    // ShuffledRDD 的 preferredLocations 里，
+    // 会把第一个 dependencies 依赖和 partition 的index 传进 MapOutputTrackerMaster (SprakEnv里get出来) 
+    // 的 getPreferredLocationsForShuffle 函数里。
+    // 敲重点，优化注意！
+       在上述方法里有3个阈值变量，都是静态直接写死的，分别是：
+        1. SHUFFLE_PREF_MAP_THRESHOLD = 1000 
+        2. SHUFFLE_PREF_REDUCE_THRESHOLD =1000
+        3. REDUCER_PREF_LOCS_FRACTION = 0.2 
+       1和2代表了map和reduce的分区上限，超过这个数都会直接跳过最佳物理位置计算，
+       理由是超过了这2个数，计算最佳位置本身就很耗时。
+       3是最佳物理位置计算时每个location时大于这个阈值则视为reduce任务的首选位置，
+        把这个值放大的话会更倾向于本地读取数据，但如果该位置很忙的话，会带来更多调度延迟。
+    */
     val taskIdToLocations: Map[Int, Seq[TaskLocation]] = try {
       stage match {
         case s: ShuffleMapStage =>
@@ -520,6 +545,7 @@ DAGScheduler.createResultStage =>
         return
     }
 
+    // 最后我们从 taskIdToLocations 得到了分区与最佳位置的对应关系
     stage.makeNewStageAttempt(partitionsToCompute.size, taskIdToLocations.values.toSeq)
 
     // If there are tasks to execute, record the submission time of the stage. Otherwise,
@@ -528,6 +554,8 @@ DAGScheduler.createResultStage =>
     if (partitionsToCompute.nonEmpty) {
       stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
     }
+    
+    // 照例向ListenerBus上报一个event
     listenerBus.post(SparkListenerStageSubmitted(stage.latestInfo, properties))
 
     // TODO: Maybe we can keep the taskBinary in Stage to avoid serializing it multiple times.
@@ -536,6 +564,7 @@ DAGScheduler.createResultStage =>
     // task gets a different copy of the RDD. This provides stronger isolation between tasks that
     // might modify state of objects referenced in their closures. This is necessary in Hadoop
     // where the JobConf/Configuration object is not thread-safe.
+    // 开始了开始了，把RDD和shuffleDep序列化，然后广播出去
     var taskBinary: Broadcast[Array[Byte]] = null
     var partitions: Array[Partition] = null
     try {
@@ -559,17 +588,7 @@ DAGScheduler.createResultStage =>
 
       taskBinary = sc.broadcast(taskBinaryBytes)
     } catch {
-      // In the case of a failure during serialization, abort the stage.
-      case e: NotSerializableException =>
-        abortStage(stage, "Task not serializable: " + e.toString, Some(e))
-        runningStages -= stage
-
-        // Abort execution
-        return
-      case NonFatal(e) =>
-        abortStage(stage, s"Task serialization failed: $e\n${Utils.exceptionString(e)}", Some(e))
-        runningStages -= stage
-        return
+        // …… 序列化失败的一些异常处理
     }
 
     val tasks: Seq[Task[_]] = try {

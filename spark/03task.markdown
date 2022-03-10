@@ -6,7 +6,8 @@ layout: default
 ## 任务执行过程
 
 问题：
- - 一个Spark任务究竟是怎么执行的？
+
+- 一个Spark任务究竟是怎么执行的？
 
 ### 一个Spark任务究竟是怎么执行的
 
@@ -14,15 +15,23 @@ layout: default
 考虑到一般Spark程序通过 `spark-submit` 或 `spark-shell` 提交之后，
 最终其实只会以 `write` 和 `collect` 进行实际执行，所以就从这2个函数入手。
 
-`write`可能会比较复杂，涉及到实际存储，所以只是为了搞清楚执行过程，
-还是从 `collect` 方法会比较简单。
+~~`write`可能会比较复杂，涉及到实际存储，所以只是为了搞清楚执行过程，~~
+~~还是从 `collect` 方法会比较简单。~~
 
-所以我决定从一段简单的REPL代码入手：
+~~所以我决定从一段简单的REPL代码入手：~~
 
-```scala
-     val groupRdd = sc.parallelize(Seq((1,2),(3,4),(5,6),(1,5),(3,8)))
-     val shuffRDD = groupRdd.groupByKey()
-     shuffRDD.collect
+半途发现任务序列化有点[区别](#diff)，所以就把groupRDD改成了下面的代码：
+
+```diff
+-   val groupRdd = sc.parallelize(Seq((1,2),(3,4),(5,6),(1,5),(3,8)))
++   val groupRdd = sc.textFile("D:\\test.csv").map(
++     x => {
++       val p = x.split(",")
++       ( p(0) , p(1) )
++   })
+
+    val shuffRDD = groupRdd.groupByKey()
+    shuffRDD.collect
 ```
 
 挑了一个会产生`ShuffledRDD`的`groupByKey` 函数，这个函数在 `PairRDDFunctions` 里，在 `RDD` 本身代码里是找不到的。
@@ -546,6 +555,7 @@ DAGScheduler.createResultStage =>
     }
 
     // 最后我们从 taskIdToLocations 得到了分区与最佳位置的对应关系
+    // 这里会注册一个 TaskMetrics 统计stage的相关信息
     stage.makeNewStageAttempt(partitionsToCompute.size, taskIdToLocations.values.toSeq)
 
     // If there are tasks to execute, record the submission time of the stage. Otherwise,
@@ -588,7 +598,7 @@ DAGScheduler.createResultStage =>
 
       taskBinary = sc.broadcast(taskBinaryBytes)
     } catch {
-        // …… 序列化失败的一些异常处理
+        // …… 序列化失败时的一些异常处理
     }
 
     val tasks: Seq[Task[_]] = try {
@@ -652,9 +662,12 @@ DAGScheduler.createResultStage =>
 
 1. [为啥key不能是array？](https://stackoverflow.com/questions/9973596/arraylist-as-key-in-hashmap)
 2. 调试Spark：
-   调试Spark需要拿出~~魔法~~调试这个万能工具了，不能不感叹Spark团队代码的优秀，
-
-    为Spark代码提供了完整的测试用例，直接打开 `ShuffleSuite`，执行第一个
+    {: diff}
+    调试Spark需要拿出~~魔法~~调试这个万能工具了，不能不感叹Spark团队代码的优秀，
+    为Spark代码提供了完整的测试用例，直接打开 `ShuffleSuite`，执行第一个。
+    结果调试到一半的时候发现 `ParallelCollectionRDD` 的行为和 `HadoopRDD` 的行为不太一样，然后半途换了一下。
+    如果是`ParallelCollectionRDD`，在生成 `taskBinaryBytes` 的时候会直接把数据都一起做序列化送出去，
+    如果是`HadoopRDD`,则只会把URI和相关信息序列化送出去。
 
     ![avatar][debugsuit1]
 

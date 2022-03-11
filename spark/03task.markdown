@@ -626,32 +626,60 @@ DAGScheduler.createResultStage =>
       //……省略若干无关代码
       // 提交任务，taskScheduler只有一种实现：TaskSchedulerImpl
       // 提交后会生成一个TaskManager，处理一些任务冲突和资源问题
-      // 之后挂进 SchedulableBuilder 的Pool里，这个SchedulableBuilder有两个我们耳熟能详的实现：
+      // 之后挂进 SchedulableBuilder 的Pool里，这个SchedulableBuilder 是 TaskScheduler 初始化的时候生成用来管理Task的，
+      // 有两个我们耳熟能详的调度实现：
       // FIFOSchedulableBuilder 和 FairSchedulableBuilder，
-      // 任务如何调度就取决于配置文件里配了哪一种方案，就会在实际调用SchedulableBuiler的时候生成哪一个Builder
-      // 之后通过 SchedulerBackend 的 reviveOffers 提交给 RpcEndpoint
+      // 任务如何调度取决于配置文件里配了哪一种方案，会在实际初始化 TaskSchedulerImpl 的时候生成哪一个Builder
+      // 之后通过 SchedulerBackend 提交给任务池队列里，同时用 reviveOffers 唤醒 SchedulerBackend，
+      // 实际上就是发条消息给 RpcEndpoint （实现类NettyRpcEndpointRef）
       // 这里多插一句，schedulerBackend 的实现类有2种，CoarseGrainedSchedulerBackend 和 LocalSchedulerBackend
       // 顾名思义，后者就是本地模式采用的，这里用了testSuit，所以启动的也是 LocalSchedulerBackend
+      // 收到消息的RpcEndpoint会直接扔给postOneWayMessage（远程RPC会扔给 postToOutbox）
+      // 后面都是远程消息处理部分，下一篇详细研究，简单说就是投递给endpoint相对应的Inbox，
+      // 在Inbox里处理消息，转回给endpoint的receive函数进行处理（当然有些别的，此处不赘述），
+      // 其实就是转了一圈又回到了 LocalSchedulerBackend 这里。
+      // 而 LocalSchedulerBackend 的 receive 函数对 ReviveOffers 消息用的是 ReviveOffers() 进行处理。
+      
       taskScheduler.submitTasks(new TaskSet(
         tasks.toArray, stage.id, stage.latestInfo.attemptNumber, jobId, properties))
     } else {
-      // Because we posted SparkListenerStageSubmitted earlier, we should mark
-      // the stage as completed here in case there are no tasks to run
-      markStageAsFinished(stage, None)
-
-      stage match {
-        case stage: ShuffleMapStage =>
-          logDebug(s"Stage ${stage} is actually done; " +
-              s"(available: ${stage.isAvailable}," +
-              s"available outputs: ${stage.numAvailableOutputs}," +
-              s"partitions: ${stage.numPartitions})")
-          markMapStageJobsAsFinished(stage)
-        case stage : ResultStage =>
-          logDebug(s"Stage ${stage} is actually done; (partitions: ${stage.numPartitions})")
-      }
-      submitWaitingChildStages(stage)
+     
+     // ……省略若干stage完成后处理工作
     }
 ```
+
+实际 `LocalSchedulerBackend` 调用 `executor` 的地方在这里：
+所以你可以看到，如果用的是 `local[*]` 的模式，这个 `executor` 是启动 `endpoint`时候直接 new 出来的，
+下面代码里的 `localexecutorid` 一直都是 `driver`（因为没别的类型的execuror了）
+在 `launchTask` 函数之后就没什么特殊之处了，
+构建一个 TaskRunner 的任务封装（这个类的 `run` 函数超复杂，
+想象一下它要完成反序列化任务，进行实际的计算等等）
+然后调用 executor 的线程池开始执行。
+
+```scala
+ private val executor = new Executor(
+    localexecutorid, localExecutorHostname, SparkEnv.get, userClassPath, isLocal = true)
+  // …… 省略其他代码
+  def reviveOffers() {
+    val offers = IndexedSeq(new WorkerOffer(localExecutorId, localExecutorHostname, freeCores,
+      Some(rpcEnv.address.hostPort)))
+    for (task <- scheduler.resourceOffers(offers).flatten) {
+      freeCores -= scheduler.CPUS_PER_TASK
+      executor.launchTask(executorBackend, task)
+    }
+  }
+```
+
+其实任务执行的时候`executor` 还会有个 `reportHeartBeat` 发送一个心跳消息，去上报状态，
+而全局的 `NettyRpcEnv` 也会有个 `ask` 函数定期去获取状态。
+
+。。。总算写完了，好累。。。
+
+~~凡Spark任务执行，驰车千驷，革车千乘，带甲十万，千里馈粮。~~
+~~则内外之费，宾客之用，胶漆之材，车甲之奉，日费千金，然后十万之师举矣~~
+
+说个鬼故事：
+这才只是local[*]
 
 ---
 参考：

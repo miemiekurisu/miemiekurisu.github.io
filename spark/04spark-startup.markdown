@@ -1,5 +1,5 @@
 ---
-permalink: /spark/startup
+permalink: /spark/sparkstartup
 layout: default
 ---
 ## Spark集群启动过程

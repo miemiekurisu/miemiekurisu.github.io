@@ -558,13 +558,8 @@ DAGScheduler.createResultStage =>
     // 这里会注册一个 TaskMetrics 统计stage的相关信息
     stage.makeNewStageAttempt(partitionsToCompute.size, taskIdToLocations.values.toSeq)
 
-    // If there are tasks to execute, record the submission time of the stage. Otherwise,
-    // post the even without the submission time, which indicates that this stage was
-    // skipped.
-    if (partitionsToCompute.nonEmpty) {
-      stage.latestInfo.submissionTime = Some(clock.getTimeMillis())
-    }
-    
+    //……省略部分代码 
+
     // 照例向ListenerBus上报一个event
     listenerBus.post(SparkListenerStageSubmitted(stage.latestInfo, properties))
 
@@ -586,6 +581,8 @@ DAGScheduler.createResultStage =>
       // consistent view of both variables.
       RDDCheckpointData.synchronized {
         taskBinaryBytes = stage match {
+          // 这里遇到的问题，ParallelCollectionRDD 的话这个地方会直接把内部的data一起序列化广播出去
+          // HadoopRDD则会不会有data传递
           case stage: ShuffleMapStage =>
             JavaUtils.bufferToArray(
               closureSerializer.serialize((stage.rdd, stage.shuffleDep): AnyRef))
@@ -595,7 +592,7 @@ DAGScheduler.createResultStage =>
 
         partitions = stage.rdd.partitions
       }
-
+      // 广播序列化后的任务数据
       taskBinary = sc.broadcast(taskBinaryBytes)
     } catch {
         // …… 序列化失败时的一些异常处理
@@ -606,7 +603,10 @@ DAGScheduler.createResultStage =>
       stage match {
         case stage: ShuffleMapStage =>
           stage.pendingPartitions.clear()
+          // 对每一个Partitions新生成一个Task，
+          // Task是个抽象类，只有两种有效实现，跟stage一样，ShuffleMapTast和ResultTask
           partitionsToCompute.map { id =>
+            // 这个时候用到了之前计算的task和位置的关系
             val locs = taskIdToLocations(id)
             val part = partitions(id)
             stage.pendingPartitions += id
@@ -616,26 +616,22 @@ DAGScheduler.createResultStage =>
           }
 
         case stage: ResultStage =>
-          partitionsToCompute.map { id =>
-            val p: Int = stage.partitions(id)
-            val part = partitions(p)
-            val locs = taskIdToLocations(id)
-            new ResultTask(stage.id, stage.latestInfo.attemptNumber,
-              taskBinary, part, locs, id, properties, serializedTaskMetrics,
-              Option(jobId), Option(sc.applicationId), sc.applicationAttemptId,
-              stage.rdd.isBarrier())
-          }
+          // ……省略resultTask生成处理
       }
     } catch {
-      case NonFatal(e) =>
-        abortStage(stage, s"Task creation failed: $e\n${Utils.exceptionString(e)}", Some(e))
-        runningStages -= stage
-        return
+        // ……省略异常处理
     }
 
     if (tasks.size > 0) {
-      logInfo(s"Submitting ${tasks.size} missing tasks from $stage (${stage.rdd}) (first 15 " +
-        s"tasks are for partitions ${tasks.take(15).map(_.partitionId)})")
+      //……省略若干无关代码
+      // 提交任务，taskScheduler只有一种实现：TaskSchedulerImpl
+      // 提交后会生成一个TaskManager，处理一些任务冲突和资源问题
+      // 之后挂进 SchedulableBuilder 的Pool里，这个SchedulableBuilder有两个我们耳熟能详的实现：
+      // FIFOSchedulableBuilder 和 FairSchedulableBuilder，
+      // 任务如何调度就取决于配置文件里配了哪一种方案，就会在实际调用SchedulableBuiler的时候生成哪一个Builder
+      // 之后通过 SchedulerBackend 的 reviveOffers 提交给 RpcEndpoint
+      // 这里多插一句，schedulerBackend 的实现类有2种，CoarseGrainedSchedulerBackend 和 LocalSchedulerBackend
+      // 顾名思义，后者就是本地模式采用的，这里用了testSuit，所以启动的也是 LocalSchedulerBackend
       taskScheduler.submitTasks(new TaskSet(
         tasks.toArray, stage.id, stage.latestInfo.attemptNumber, jobId, properties))
     } else {

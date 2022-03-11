@@ -20,7 +20,7 @@ Spark代码阅读分析备忘录
 
 ### Spark集群启动过程
 
-分析[Spark集群启动过程](/spark/parkstartup)
+分析[Spark集群启动过程](/spark/sparkstartup)
 
 ---
 

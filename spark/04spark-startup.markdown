@@ -20,7 +20,7 @@ Spark standalone模式的启动脚本分别是 `./sbin/start-master.sh` 和 `./s
 
 和 `org.apache.spark.deploy.worker.Worker` 两个主要类，其他的都是载入一些环境配置和环境变量，
 
-最终在脚本里还是通过 `spark-class` 提交的。
+最终在脚本里还是通过 [`spark-class`](/spark/appendix/appendix) 提交的。
 
 ### Master启动
 

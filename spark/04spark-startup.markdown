@@ -24,4 +24,8 @@ Spark standalone模式的启动脚本分别是 `./sbin/start-master.sh` 和 `./s
 
 ### Master启动
 
-先从 `org.apache.spark.deploy.master.Master` 开始，
+先从 `org.apache.spark.deploy.master.Master` 开始，启动Master的入口在这个类的伴生类里，
+通过 `startRpcEnvAndEndpoint` 函数返回一个3元tuple，包含以下数据：
+   *   (1) The Master RpcEnv
+   *   (2) The web UI bound port
+   *   (3) The REST server bound port, if any

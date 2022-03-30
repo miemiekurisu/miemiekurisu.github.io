@@ -34,6 +34,7 @@ Spark standalone模式的启动脚本分别是 `./sbin/start-master.sh` 和 `./s
 传递给`startRpcEnvAndEndpoint`。
 
 总之，启动Master的入口在这个类的伴生对象里，
+
 通过 `startRpcEnvAndEndpoint` 函数返回一个3元tuple，包含以下数据：
 
 

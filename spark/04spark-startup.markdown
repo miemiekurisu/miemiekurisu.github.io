@@ -26,15 +26,17 @@ Spark standalone模式的启动脚本分别是 `./sbin/start-master.sh` 和 `./s
 
 先从 `org.apache.spark.deploy.master.Master` 开始，
 很正常的`main`类，进行[log的注册](/spark/aappendix/#关于Master启动时的log注册),注册完启动。
-值得一提的是`main`类里的SparkConf是直接new出来的，直接取了默认配置，
-默认会去几个地方找：
-    1. System.getProperties
-    2. 
-启动Master的入口在这个类的伴生类里，
+
+值得一提的是`main`类里的SparkConf是直接new出来的，直接取了默认配置，这个下次有空再说吧,
+
+接着有一些master特有的启动参数解析，主要是master的ip，port端口和webUI的端口，
+
+传递给`startRpcEnvAndEndpoint`。
+
+总之，启动Master的入口在这个类的伴生对象里，
 通过 `startRpcEnvAndEndpoint` 函数返回一个3元tuple，包含以下数据：
 
-```
- (1) The Master RpcEnv
- (2) The web UI bound port
- (3) The REST server bound port, if any
-```
+
+(1) The Master RpcEnv
+(2) The web UI bound port
+(3) The REST server bound port, if any

@@ -37,8 +37,11 @@ Spark standalone模式的启动脚本分别是 `./sbin/start-master.sh` 和 `./s
 
 通过 `startRpcEnvAndEndpoint` 函数返回一个3元tuple，包含以下数据：
 
-- (1) The Master RpcEnv
 
-- (2) The web UI bound port
+(1) The Master RpcEnv
 
-- (3) The REST server bound port, if any
+(2) The web UI bound port
+
+(3) The REST server bound port, if any
+
+这个 `startRpcEnvAndEndpoint` 大有文章，

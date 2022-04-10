@@ -45,3 +45,5 @@ Spark standalone模式的启动脚本分别是 `./sbin/start-master.sh` 和 `./s
 (3) The REST server bound port, if any
 
 这个 `startRpcEnvAndEndpoint` 大有文章，
+
+~~不过我觉得我缺少Netty知识，去补Netty了，回头回来填坑~~

@@ -10,6 +10,6 @@ permalink: /about/
 <title>goto MainPage</title>
 </head>
 <body>
-This About is a landing page for the main apache.org website. Click <a href="https://miemiekurisu.github.io">here</a> to go to the main page.
+This About is a landing page for the main miemie website. Click <a href="https://miemiekurisu.github.io">here</a> to go to the main page.
 </body>
 </html>

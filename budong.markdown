@@ -28,6 +28,12 @@ Spark代码阅读分析备忘录
 
 ---
 
+## FVWM配置及一些文档记录
+
+### [FVWM配合软件及配置](/fvwm/fvwmdoc1)
+
+---
+
 ### 附录
 
 挖掘代码过程中的一些[分叉](/spark/appendix/appendix)

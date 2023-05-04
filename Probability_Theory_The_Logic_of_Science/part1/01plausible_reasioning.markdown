@@ -1,3 +1,7 @@
+---
+permalink: /book/pttlos/part1
+layout: default
+---
 # 1 
 # 合情推断
 

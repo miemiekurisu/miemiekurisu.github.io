@@ -53,5 +53,7 @@ layout: default
 
 ---
 译者注：
+
 [^1]: Simon and Rescher （1996）： Cause and Counterfactual https://www.researchgate.net/publication/249080199_Cause_and_Counterfactual
+
 [^2]: contraposition： https://zh.wikipedia.org/wiki/%E7%9B%B4%E6%8E%A5%E6%8E%A8%E7%90%86

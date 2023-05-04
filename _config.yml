@@ -16,6 +16,8 @@ plugins:
   - jekyll-avatar
   - jekyll-mentions
 
+markdown: kramdown
+
 exclude:
   - Makefile
   - CNAME
@@ -29,5 +31,3 @@ exclude:
   - package-lock.json
   - webpack.config.js
   - jekyll-rtd-theme.gemspec
-
-markdown: kramdown

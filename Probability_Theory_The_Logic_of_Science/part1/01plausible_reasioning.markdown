@@ -52,7 +52,7 @@ layout: default
 
 
 ---
-译者注：
+译注：
 
 [^1]: Simon and Rescher （1996）： Cause and Counterfactual https://www.researchgate.net/publication/249080199_Cause_and_Counterfactual
 

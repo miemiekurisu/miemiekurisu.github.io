@@ -1,11 +1,6 @@
-<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>BLE 标签时间同步</title>
+<div class="web-time-sync" lang="zh-CN">
   <style>
-    :root {
+    .web-time-sync {
       color-scheme: dark;
       --bg0: #070a14;
       --bg1: #0b1020;
@@ -24,28 +19,25 @@
       --pad-sm: 12px;
       --focus: 0 0 0 3px rgba(122, 162, 255, 0.25);
       font-family: system-ui, -apple-system, Segoe UI, Roboto, "Noto Sans", "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
       background:
         radial-gradient(1200px 700px at 18% 10%, rgba(122,162,255,0.30), transparent 62%),
         radial-gradient(900px 540px at 82% 16%, rgba(56,217,169,0.22), transparent 56%),
         radial-gradient(900px 560px at 55% 110%, rgba(255,107,107,0.10), transparent 52%),
         linear-gradient(180deg, var(--bg0), var(--bg1));
       color: var(--text);
+      border-radius: 12px;
+      overflow: hidden;
     }
 
-    .wrap {
+    .web-time-sync * { box-sizing: border-box; }
+
+    .web-time-sync .wrap {
       max-width: 980px;
       margin: 0 auto;
       padding: 22px;
     }
 
-    .header {
+    .web-time-sync .header {
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 14px;
@@ -53,14 +45,14 @@
       margin-bottom: 14px;
     }
 
-    h1 {
+    .web-time-sync h1 {
       font-size: 18px;
       margin: 0;
       letter-spacing: 0.2px;
       font-weight: 800;
     }
 
-    .hint {
+    .web-time-sync .hint {
       margin-top: 6px;
       color: var(--muted);
       font-size: 12px;
@@ -68,13 +60,13 @@
       max-width: 640px;
     }
 
-    .grid {
+    .web-time-sync .grid {
       display: grid;
       grid-template-columns: 1fr;
       gap: 12px;
     }
 
-    .card {
+    .web-time-sync .card {
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -84,14 +76,14 @@
       -webkit-backdrop-filter: blur(10px);
     }
 
-    .row {
+    .web-time-sync .row {
       display: flex;
       gap: 10px;
       align-items: center;
       flex-wrap: wrap;
     }
 
-    button {
+    .web-time-sync button {
       appearance: none;
       border: 1px solid rgba(255,255,255,0.14);
       background: rgba(255,255,255,0.06);
@@ -104,21 +96,21 @@
       transition: transform 120ms ease, border-color 120ms ease, background 120ms ease, opacity 120ms ease;
       user-select: none;
     }
-    button:hover { border-color: rgba(122,162,255,0.55); transform: translateY(-1px); }
-    button:active { transform: translateY(0px); }
-    button:focus-visible { outline: none; box-shadow: var(--focus); }
-    button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+    .web-time-sync button:hover { border-color: rgba(122,162,255,0.55); transform: translateY(-1px); }
+    .web-time-sync button:active { transform: translateY(0px); }
+    .web-time-sync button:focus-visible { outline: none; box-shadow: var(--focus); }
+    .web-time-sync button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 
-    .primary {
+    .web-time-sync .primary {
       border-color: rgba(122,162,255,0.65);
       background: linear-gradient(180deg, rgba(122,162,255,0.22), rgba(122,162,255,0.10));
     }
-    .danger {
+    .web-time-sync .danger {
       border-color: rgba(255,107,107,0.55);
       background: linear-gradient(180deg, rgba(255,107,107,0.18), rgba(255,107,107,0.08));
     }
 
-    .pill {
+    .web-time-sync .pill {
       font-size: 12px;
       padding: 6px 10px;
       border-radius: 999px;
@@ -129,10 +121,10 @@
       -webkit-backdrop-filter: blur(8px);
       white-space: nowrap;
     }
-    .pill.ok { color: var(--ok); border-color: rgba(56,217,169,0.45); }
-    .pill.bad { color: var(--danger); border-color: rgba(255,107,107,0.45); }
+    .web-time-sync .pill.ok { color: var(--ok); border-color: rgba(56,217,169,0.45); }
+    .web-time-sync .pill.bad { color: var(--danger); border-color: rgba(255,107,107,0.45); }
 
-    label {
+    .web-time-sync label {
       display: inline-flex;
       align-items: center;
       gap: 8px;
@@ -141,7 +133,7 @@
       margin-left: 2px;
     }
 
-    input[type="number"] {
+    .web-time-sync input[type="number"] {
       width: 100px;
       padding: 9px 10px;
       border-radius: 12px;
@@ -151,9 +143,9 @@
       outline: none;
       transition: border-color 120ms ease, box-shadow 120ms ease;
     }
-    input[type="number"]:focus { border-color: rgba(122,162,255,0.6); box-shadow: var(--focus); }
+    .web-time-sync input[type="number"]:focus { border-color: rgba(122,162,255,0.6); box-shadow: var(--focus); }
 
-    .kv {
+    .web-time-sync .kv {
       display: grid;
       grid-template-columns: 160px 1fr;
       gap: 8px 12px;
@@ -161,13 +153,13 @@
       color: var(--muted);
       font-size: 12px;
     }
-    .kv b {
+    .web-time-sync .kv b {
       color: rgba(233, 240, 255, 0.92);
       font-weight: 700;
       overflow-wrap: anywhere;
     }
 
-    .log {
+    .web-time-sync .log {
       margin-top: 12px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 12px;
@@ -182,34 +174,32 @@
     }
 
     @media (max-width: 720px) {
-      .wrap { padding: 16px; }
-      .header { grid-template-columns: 1fr; }
-      .card { padding: var(--pad-sm); }
-      .kv { grid-template-columns: 1fr; gap: 6px 10px; }
-      .kv span { opacity: 0.9; }
-      .row {
+      .web-time-sync .wrap { padding: 16px; }
+      .web-time-sync .header { grid-template-columns: 1fr; }
+      .web-time-sync .card { padding: var(--pad-sm); }
+      .web-time-sync .kv { grid-template-columns: 1fr; gap: 6px 10px; }
+      .web-time-sync .kv span { opacity: 0.9; }
+      .web-time-sync .row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 10px;
         align-items: stretch;
       }
-      .row button { width: 100%; }
-      label {
+      .web-time-sync .row button { width: 100%; }
+      .web-time-sync label {
         grid-column: 1 / -1;
         justify-content: space-between;
       }
-      #timeSourcePill { grid-column: 1 / -1; justify-self: start; }
-      #btnSync { grid-column: 1 / -1; }
+      .web-time-sync #timeSourcePill { grid-column: 1 / -1; justify-self: start; }
+      .web-time-sync #btnSync { grid-column: 1 / -1; }
     }
 
     @media (max-width: 420px) {
-      .row { grid-template-columns: 1fr; }
-      #btnSync { grid-column: auto; }
-      input[type="number"] { width: 100%; }
+      .web-time-sync .row { grid-template-columns: 1fr; }
+      .web-time-sync #btnSync { grid-column: auto; }
+      .web-time-sync input[type="number"] { width: 100%; }
     }
   </style>
-</head>
-<body>
   <div class="wrap">
     <div class="header">
       <div>
@@ -248,6 +238,5 @@
     </div>
   </div>
 
-  <script type="module" src="./js/app.js"></script>
-</body>
-</html>
+  <script type="module" src="{{ '/web_time_sync/js/app.js' | relative_url }}"></script>
+</div>

@@ -1,4 +1,4 @@
-import { fmtTs } from './utils.js';
+import { fmtShiftedAsLocal } from './utils.js';
 
 // Browser cannot do UDP NTP. We use HTTPS time APIs as an NTP-like source.
 // We treat the returned time as UTC milliseconds.
@@ -20,8 +20,12 @@ const TIME_ENDPOINTS = [
     parse: async (res) => {
       const j = await res.json();
       // timeapi.io: { dateTime: '2026-01-18T12:34:56.123', ... }
-      if (typeof j.dateTime === 'string') return Date.parse(j.dateTime + 'Z');
-      if (typeof j.dateTime === 'string') return Date.parse(j.dateTime);
+      if (typeof j.dateTime === 'string') {
+        const s = j.dateTime;
+        // If timezone info is present, parse directly; otherwise treat as UTC.
+        if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) return Date.parse(s);
+        return Date.parse(s + 'Z');
+      }
       return null;
     },
   },
@@ -104,6 +108,6 @@ export function computeDeviceTimeFields(utcNowMs, tzOffsetHours) {
     month,
     day,
     week,
-    debugLocalString: fmtTs(shiftedMs),
+    debugLocalString: fmtShiftedAsLocal(shiftedMs),
   };
 }

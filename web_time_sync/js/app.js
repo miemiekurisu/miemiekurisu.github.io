@@ -1,5 +1,5 @@
 import { BleTag } from './ble.js';
-import { clamp, fmtTs } from './utils.js';
+import { clamp, fmtUtc } from './utils.js';
 import { computeDeviceTimeFields, getAccurateClock } from './time.js';
 
 const el = (id) => document.getElementById(id);
@@ -51,7 +51,7 @@ let clockRefreshTimer = null;
 async function refreshClock() {
   clock = await getAccurateClock();
   setTimeSource(clock.source);
-  lastFetchEl.textContent = `${fmtTs(clock.utcNowMs())} (UTC)`;
+  lastFetchEl.textContent = `${fmtUtc(clock.utcNowMs())} (UTC)`;
   log(`获取时间成功：${clock.source}`);
 }
 
